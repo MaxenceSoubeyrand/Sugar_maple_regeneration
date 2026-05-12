@@ -13,8 +13,12 @@ library(ggpubr)
 library(binom)
 library(ggeffects)
 
+site <- data.frame(site=c("MUS", "HED", "MON", "KEK", "KIP"), 
+                   latitude=c(49.932, 49.243, 48.460, 48.191, 46.740),
+                   longitude=c(-78.698, -78.311, -79.418, -79.112, -78.905))
+
 #Growth data
-height <- read_excel("~/postdoc/germination/github/data/height.xlsx")
+height <- read_excel("data/height.xlsx")
 
 #c as cold injuries, and d and m as mortality. 
 
@@ -60,7 +64,9 @@ height_mort_cold <- height %>%
 summary_ci_dead <- height_mort_cold %>%
   group_by(site, year, mort_cold) %>%
   summarise(n = n(), .groups = "drop") %>% 
-  filter(mort_cold!="alive")
+  filter(mort_cold!="alive") %>% 
+  mutate(mort_cold=case_when(mort_cold=="cold injury"~"dead",
+                             .default = mort_cold))
 
 summary_ci_dead$site <- factor(summary_ci_dead$site, 
                                levels = c("KIP", "KEK", "MON", "HED", "MUS"))
@@ -69,15 +75,15 @@ summary_ci_dead$site <- factor(summary_ci_dead$site,
 status_plot <- ggplot(summary_ci_dead, aes(x = year, y = n/360, fill = mort_cold)) +
   geom_bar(stat = "identity", position = "stack") +
   facet_wrap(~site, ncol=5) +
-  scale_fill_manual(values = c("dead" = "red", "cold injury" = "deepskyblue")) +
-  labs(x = "Year", y = "Proportion of seedlings", fill = "Status") +
+  scale_fill_manual(values = c("dead" = "black", "cold injury" = "deepskyblue")) +
+  labs(x = "Year", y = "Mortality", fill = "Status") +
   theme_minimal() +
   theme(strip.text.x = element_text(size = 12),
         axis.text=element_text(size=12),
         axis.title=element_text(size=14),
         legend.title = element_text(size = 14),
         legend.text = element_text(size=12),
-        legend.position = "bottom",
+        legend.position = "none",
         panel.background = element_rect(fill = "white", color = NA),
         plot.background  = element_rect(fill = "white", color = NA))
 
@@ -111,7 +117,7 @@ mort_summary <- df_glm %>%
 mort_summary
 
 #Adding climate variables
-clim <- readRDS("~/postdoc/germination/github/data/clim_growth.rds") %>% 
+clim <- readRDS("data/clim_growth.rds") %>% 
   mutate(year=as.character(year)) %>% 
   rename(nb_late_frost_event=n_frost)
 
@@ -124,15 +130,17 @@ df_glm$light  <- case_when(
   df_glm$light == "SH-3" ~ "Dense-canopy")
 df_glm$light  <- factor(df_glm$light, levels = c("Dense-canopy", "Intermediate", "Open-canopy"))
 
+df_glm <- df_glm %>% left_join(site)
+
 #Random effect selection
-mod_re1 <- glmer(dead_bin ~ light + 
+mod_re1 <- glmer(dead_bin ~ latitude + light + 
                 scale(temperature) + 
                 scale(precipitation) + 
                 scale(nb_late_frost_event) + 
                 (1 | site/block) + (1 | seedling_ID) + (1 | year),
               data = df_glm, family = binomial) 
 
-mod_re2 <- glmer(dead_bin ~ light + 
+mod_re2 <- glmer(dead_bin ~ latitude +light + 
                    scale(temperature) + 
                    scale(precipitation) + 
                    scale(nb_late_frost_event) + 
@@ -140,7 +148,7 @@ mod_re2 <- glmer(dead_bin ~ light +
                  data = df_glm, family = binomial) 
 
 
-mod_re3 <- glmer(dead_bin ~ light +
+mod_re3 <- glmer(dead_bin ~ latitude + light +
                    scale(temperature) + 
                    scale(precipitation) + 
                    scale(nb_late_frost_event) + 
@@ -148,7 +156,7 @@ mod_re3 <- glmer(dead_bin ~ light +
                  data = df_glm, family = binomial) 
 
 
-mod_re4 <- glm(dead_bin ~ light +
+mod_re4 <- glm(dead_bin ~ latitude + light +
                    scale(temperature) + 
                    scale(precipitation) + 
                    scale(nb_late_frost_event),
@@ -159,56 +167,71 @@ AIC_re <- data.frame(mod=1:4, AIC=c(AIC(mod_re1), AIC(mod_re2), AIC(mod_re3), AI
 AIC_re
 
 #Fixed effect selection
-mod1 <- glmer(dead_bin ~ light +
+mod1 <- glmer(dead_bin ~ latitude +light +
                      scale(temperature) + 
                      scale(precipitation) + 
                      scale(nb_late_frost_event) + 
                      light:scale(temperature) +
                      light:scale(precipitation) +
                      light:scale(nb_late_frost_event) +
+                     scale(temperature):scale(precipitation) + 
                      (1|site/block),
                    data = df_glm, family = binomial)  
 
-mod2 <- glmer(dead_bin ~ light +
+mod2 <- glmer(dead_bin ~ latitude +light +
                 scale(temperature) + 
                 scale(precipitation) + 
                 scale(nb_late_frost_event) + 
                 light:scale(temperature) +
                 light:scale(precipitation) +
+                scale(temperature):scale(precipitation) + 
                 (1|site/block),
               data = df_glm, family = binomial) 
 
-mod3 <- glmer(dead_bin ~ light +
+mod3 <- glmer(dead_bin ~ latitude +light +
                 scale(temperature) + 
                 scale(precipitation) + 
                 scale(nb_late_frost_event) + 
                 light:scale(temperature) +
+                scale(temperature):scale(precipitation) + 
                 (1|site/block),
               data = df_glm, family = binomial) 
 
-mod4 <- glmer(dead_bin ~ light +
+mod4 <- glmer(dead_bin ~ latitude +light +
+                scale(temperature) + 
+                scale(precipitation) + 
+                scale(nb_late_frost_event) +
+                scale(temperature):scale(precipitation) + 
+                (1|site/block),
+              data = df_glm, family = binomial) 
+
+mod5 <- glmer(dead_bin ~ latitude +light +
                 scale(temperature) + 
                 scale(precipitation) + 
                 scale(nb_late_frost_event) +
                 (1|site/block),
               data = df_glm, family = binomial) 
 
-mod5 <- glmer(dead_bin ~ light +
+mod6 <- glmer(dead_bin ~ latitude +light +
                 scale(temperature) + 
                 scale(precipitation) + 
                 (1|site/block),
               data = df_glm, family = binomial) 
 
-mod6 <- glmer(dead_bin ~ light +
+mod7 <- glmer(dead_bin ~ latitude +light +
                 scale(temperature) + 
                 (1|site/block),
               data = df_glm, family = binomial) 
 
-mod7 <- glmer(dead_bin ~ light +
+mod8 <- glmer(dead_bin ~ latitude +light +
                 (1|site/block),
               data = df_glm, family = binomial) 
 
-mod8 <- glmer(dead_bin ~ 1 +
+mod9 <- glmer(dead_bin ~ latitude +
+                (1|site/block),
+              data = df_glm, family = binomial) 
+
+mod10 <- glmer(dead_bin ~ 1 +
                 (1|site/block),
               data = df_glm, family = binomial) 
 
@@ -222,11 +245,19 @@ liste_mod <- list(
   mod5 = mod5,
   mod6 = mod6,
   mod7 = mod7,
-  mod8 = mod8)
+  mod8 = mod8,
+  mod9 = mod9,
+  mod10 = mod10)
 aictab(liste_mod)
 
 sel_mod <- mod2
 #Model 2 is not convergiong but very close to the threshold, so it is acceptable. 
+
+source("diagonistic_plot_function.R")
+
+diagnostic_plots(sel_mod, df_glm)
+ggsave(plot=diagnostic_plots(sel_mod, df_glm), filename="figures/SI_diag_plot_mortality.png", 
+       width=8, height=10)
 
 summary(sel_mod)
 car::Anova(sel_mod, type=2)
@@ -234,6 +265,11 @@ car::Anova(sel_mod, type=2)
 r2 <- r.squaredGLMM(sel_mod)
 r2
 
+emm_light <- emmeans(
+  sel_mod,
+  ~ light,
+  type = "response"
+)
 
 #  light * temperature predictions (figure 5.b)
 gge_light_temp <- ggpredict(sel_mod, terms = c("temperature [all]"))
@@ -307,6 +343,5 @@ frost_dead_plot <- ggarrange(ggarrange(status_plot, labels=c("a"), label.x = 0.0
   border("white")
 
 ggsave(plot=frost_dead_plot, 
-       filename="~/postdoc/germination/github/figures/frost_dead_plot.png", 
+       filename="figures/frost_dead_plot.png", 
        width=8, height=6.2)
-

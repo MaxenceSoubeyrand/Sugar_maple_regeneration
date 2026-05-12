@@ -9,9 +9,9 @@ library(ggpubr)
 library(corrplot)
 
 #Climate data
-temp_obs <- readRDS("~/postdoc/germination/github/data/temperature.rds")
-temp_simul <- read_csv("~/postdoc/germination/github/data/temperature_era5.csv")
-precip_simul <- read_csv("~/postdoc/germination/github/data/precipitation_era5.csv")
+temp_obs <- readRDS("data/temperature.rds")
+temp_simul <- read_csv("data/temperature_era5.csv")
+precip_simul <- read_csv("data/era5/precipitation_era5.csv")
 
 clim_simul <- left_join(temp_simul, precip_simul)
 
@@ -113,7 +113,7 @@ clim_germ <- mean_temp %>%
   mutate(year=as.numeric(year)) %>% 
   left_join(nb_late_frost_events)
 
-saveRDS(clim_germ, "~/postdoc/germination/github/data/clim_germination.rds")
+saveRDS(clim_germ, "data/clim_germination.rds")
 
 
 ####For the growth####
@@ -132,7 +132,7 @@ clim_growth <- mean_temp %>%
   mutate(year=as.numeric(year)) %>% 
   left_join(nb_late_frost_events)
 
-saveRDS(clim_growth, "~/postdoc/germination/github/data/clim_growth.rds")
+saveRDS(clim_growth, "data/clim_growth.rds")
 
 
 ####Figure 2####
@@ -143,7 +143,12 @@ clim_frost <- mean_temp %>%
             ecart_type = sd(temperature, na.rm = TRUE),
             temp_lower = mean_temp - ecart_type,
             temp_upper= mean_temp + ecart_type,
-            sum_precip=sum(precip_simul, na.rm = TRUE)) %>% 
+            mean_temp_germ = mean(ifelse(month %in% c("05", "06"), temperature, NA), na.rm = TRUE),
+            ecart_type_germ = sd(ifelse(month %in% c("05", "06"), temperature, NA), na.rm = TRUE),
+            temp_lower_germ = mean_temp_germ - ecart_type_germ,
+            temp_upper_germ= mean_temp_germ + ecart_type_germ,
+            sum_precip_growth=sum(precip_simul, na.rm = TRUE),
+            precip_germ=sum(ifelse(month %in% c("05", "06"), precip_simul, 0))) %>% 
   mutate(year=as.numeric(year)) %>% 
   left_join(nb_late_frost_events) %>% 
   dplyr::select(-ecart_type)
@@ -155,20 +160,55 @@ clim_frost %>%
   summarize(m=mean(n_frost))
 
 
+
+temp <- clim_frost %>%
+  rename(
+    temp_mean_growth = mean_temp,
+    temp_lower_growth = temp_lower,
+    temp_upper_growth = temp_upper,
+    temp_mean_germ = mean_temp_germ,
+    temp_lower_germ = temp_lower_germ,
+    temp_upper_germ = temp_upper_germ
+  )
+
+
+temp_long <- temp %>%
+  pivot_longer(
+    cols = starts_with("temp_"),
+    names_to = c(".value", "model"),
+    names_pattern = "temp_(mean|lower|upper)_(.*)"
+  ) %>% 
+  mutate(variable="temperature") %>% 
+  select(site, year, variable, model, mean, lower, upper)
+
+
+
+precip_long <- clim_frost %>%
+  select(
+    site, year,
+    sum_precip_growth,
+    precip_germ,
+    n_frost
+  ) %>%
+  pivot_longer(
+    cols = c(sum_precip_growth, precip_germ),
+    names_to = "model",
+    values_to = "mean"
+  ) %>%
+  ungroup() %>% 
+  mutate(
+    model = dplyr::recode(
+      model,
+      sum_precip_growth = "growth",
+      precip_germ = "germination"
+    )
+  ) %>% 
+  mutate(variable="precipitation")
+
+#####################################
+precip_long$site <- factor(precip_long$site, levels = c("KIP", "KEK", "MON", "HED", "MUS"))
+temp_long$site <- factor(temp_long$site, levels = c("KIP", "KEK", "MON", "HED", "MUS"))
 clim_frost$site <- factor(clim_frost$site, levels = c("KIP", "KEK", "MON", "HED", "MUS"))
-
-clim_frost <- clim_frost %>% 
-  rename(`Mean temperature (in °C)`=mean_temp,
-         `# of frost events`=n_frost,
-         `Precipitation (in mm)`=sum_precip) %>% 
-  pivot_longer(cols = c(`Mean temperature (in °C)`,`# of frost events`, `Precipitation (in mm)`),
-               names_to = "variable",
-               values_to = "values") %>% 
-  mutate(temp_lower=case_when(variable=="# of frost events" ~ NA, .default = temp_lower),
-         temp_upper=case_when(variable=="# of frost events" ~ NA, .default = temp_upper),
-         temp_lower=case_when(variable=="Precipitation (in mm)" ~ NA, .default = temp_lower),
-         temp_upper=case_when(variable=="Precipitation (in mm)" ~ NA, .default = temp_upper))
-
 
 rect_df <- data.frame(xmin = c(0, 2), xmax = c(2, 6),
                       labs = c("within or", "north of the current sugar maple range")) %>% 
@@ -180,56 +220,114 @@ rect_df$`Site` <- factor(rect_df$`Site`, levels = c("within or", "north of the c
 
 #Graphs
 #Figure 2.a
-temp <- ggplot(data=filter(clim_frost, variable=="Mean temperature (in °C)"), aes(x=site , y= values, ymin=temp_lower, ymax=temp_upper)) +
+
+annot_df <- data.frame(
+  year = 2005,
+  site = c("KIP", "KIP"),
+  mean = c(30, 10),
+  model = c(
+    "growth",
+    "germ"
+  ),
+  label = c("Growth and mortality\nexperience", "Germination experience")
+)
+
+
+
+
+temp <- ggplot( data = temp_long,
+      aes(x = site, y = mean, ymin = lower, ymax = upper, color = model)) +
   geom_rect(data = rect_df, aes(xmin = xmin, xmax = xmax, 
                                 ymin = -Inf, ymax = Inf, 
                                 fill = `Site`), 
             alpha = .3, inherit.aes = FALSE) +
   scale_fill_viridis_d() +
-  geom_point(size=2) +
-  geom_errorbar(width = 0.3)+
-  facet_wrap(~year) + 
+  geom_point(size = 2, position = position_dodge(width = 0.5)) +
+  geom_errorbar(position = position_dodge(width = 0.5), width = 0.2) +
+  geom_text(
+    data = annot_df,
+    aes(x = site, y = mean, label = label, color = model),
+    inherit.aes = FALSE,
+    size = 3.5,
+    hjust = 0,
+    fontface = "bold"
+  ) +
+  scale_color_manual(
+    values = c(
+      "growth"   = "#1b9e77",
+      "germ" = "#d95f02"
+    )
+  ) +
+  facet_wrap(~year) +
   ylab("Temperature (in °C)") +
   xlab(NULL) +
-  ylim(0, NA) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  theme(strip.text = element_text(size = 12),
-        axis.text=element_text(size=12),
-        axis.title=element_text(size=14),
-        legend.title = element_text(size = 12),
-        legend.text = element_text(size=12),
-        legend.position = "bottom")
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none",
+    strip.text = element_text(size = 12),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14)
+  ) +coord_cartesian(ylim = c(0, 32))+ guides(color = "none", fill = "none")
+
 
 #Figure 2.b
-prec <- ggplot(data=filter(clim_frost, variable=="Precipitation (in mm)"), aes(x=site , y= values, ymin=temp_lower, ymax=temp_upper)) +
+
+
+annot_df <- data.frame(
+  year = 2005,
+  site = c("KIP", "KIP"),
+  values = c(350, 75),
+  model = c(
+    "growth",
+    "germination"
+  ),
+  label = c("Growth and mortality\nexperience", "Germination experience")
+)
+
+
+prec <- ggplot(data=precip_long,
+               aes(x=site , y= mean, color=model)) +
   geom_rect(data = rect_df, aes(xmin = xmin, xmax = xmax, 
                                 ymin = -Inf, ymax = Inf, 
                                 fill = `Site`), 
             alpha = .3, inherit.aes = FALSE) +
   scale_fill_viridis_d() +
   geom_point(size=2) +
-  geom_errorbar(width = 0.3)+
+    scale_color_manual(
+      values = c(
+        "growth"   = "#1b9e77",
+        "germination" = "#d95f02"
+      )
+    ) +
+    
+    geom_text(
+      data = annot_df,
+      aes(x = site, y = values, label = label, color = model),
+      inherit.aes = FALSE,
+      size = 3.5,
+      hjust = 0,
+      fontface = "bold"
+    )+
   facet_wrap(~year) + 
   ylab("Precipitation (in mm)") +
   xlab(NULL) +
   ylim(0, NA) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none") +
   theme(strip.text = element_text(size = 12),
         axis.text=element_text(size=12),
         axis.title=element_text(size=14),
         legend.title = element_text(size = 12),
-        legend.text = element_text(size=12),
-        legend.position = "bottom")
+        legend.text = element_text(size=12))+ guides(color = "none", fill = "none")
 
 #Figure 2.c
-frost <- ggplot(data=filter(clim_frost, variable=="# of frost events"), aes(x=site , y= values, ymin=temp_lower, ymax=temp_upper)) +
+frost <- ggplot(data=clim_frost, aes(x=site , y= n_frost)) +
   geom_rect(data = rect_df, aes(xmin = xmin, xmax = xmax, 
                                 ymin = -Inf, ymax = Inf, 
                                 fill = `Site`), 
             alpha = .3, inherit.aes = FALSE) +
   scale_fill_viridis_d() +
   geom_point(size=2) +
-  geom_errorbar(width = 0.3)+
   facet_wrap(~year) + 
   ylab("# of frost events") +
   xlab(NULL) +
@@ -289,23 +387,99 @@ plot_frost_clim <- ggarrange(temp, prec, frost, frost_events,
   bgcolor("white") +
   border("white")
 
-ggsave(plot=plot_frost_clim, filename="~/postdoc/germination/github/figures/temp_frost.png", 
-       width=5, height=11)
+ggsave(plot=plot_frost_clim, filename="figures/temp_frost.png", 
+       width=7, height=11)
+
+#Correlation
 
 site <- data.frame(site=c("MUS", "HED", "MON", "KEK", "KIP"), 
                    latitude=c(49.932, 49.243, 48.460, 48.191, 46.740),
                    longitude=c(-78.698, -78.311, -79.418, -79.112, -78.905))
 
-clim_cor <- left_join(site, clim_cor)
+clim_cor <- left_join(site, clim_frost) %>% 
+  select(temp_growth=mean_temp, temp_germ=mean_temp_germ,
+         precip_growth=sum_precip_growth, precip_germ, n_frost, latitude)
 
-clim_cor <- clim_cor[,c(2, 5, 8, 9)]
-colnames(clim_cor) <- c("Latitude", "Mean temperature (in °C)", "Precipitation (in mm)", "# of frost events")
+colnames(clim_cor) <- c("Mean temperature growth\nexperiment (in °C)",
+                        "Mean temperature germination\nexperiment (in °C)", 
+                        "Precipitation growth\nexperiment (in mm)", 
+                        "Precipitation germination\nexperiment (in mm)",
+                        "# of frost events", "Latitude")
 
-M <-  cor(clim_cor)
+cor_pmat <- function(data, method = "pearson") {
+  vars <- colnames(data)
+  
+  res <- expand.grid(var1 = vars, var2 = vars) %>%
+    rowwise() %>%
+    mutate(
+      test = list(cor.test(
+        data[[var1]],
+        data[[var2]],
+        method = method
+      )),
+      r = unname(test$estimate),
+      p_raw = test$p.value
+    ) %>%
+    ungroup()
+  
+  # Bonferroni correction
+  res$p_bonf <- p.adjust(res$p_raw, method = "bonferroni")
+  
+  res
+}
 
 
-png(filename="~/postdoc/germination/github/figures/corr_plot.png", width=7, height=7, units="in", res=1000)
-corrplot(M, method = 'number',tl.col = "black", cl.cex=1)
+cor_df <- cor_pmat(clim_cor)
+
+cor_df <- cor_df %>%
+  mutate(
+    r_lab = sprintf("%.2f", r),
+    p_lab = ifelse(
+      p_bonf < 0.001,
+      "p<0.001",
+      sprintf("p=%.3f", p_bonf)
+    )
+  )
+
+
+corr_plot <- ggplot(cor_df, aes(x = var1, y = var2, fill = r)) +
+  geom_tile(color = "white") +
+  
+  # Correlation (black)
+  geom_text(
+    aes(label = r_lab),
+    color = "black",
+    size = 4,
+    vjust = -0.3
+  ) +
+  
+  # Bonferroni p-values (red)
+  geom_text(
+    aes(label = p_lab),
+    color = "red",
+    size = 3,
+    vjust = 1.2
+  ) +
+  
+  scale_fill_gradient2(
+    low = "#B2182B",
+    mid = "white",
+    high = "#2166AC",
+    midpoint = 0,
+    limits = c(-1, 1),
+    name = "Correlation"
+  ) +
+  
+  coord_equal() +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+
+png(filename="figures/corr_plot.png", width=7, height=7, units="in", res=1000)
+corr_plot
 dev.off()
 
 

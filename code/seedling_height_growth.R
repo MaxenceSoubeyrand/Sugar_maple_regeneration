@@ -2,8 +2,6 @@
 
 rm(list=ls())
 
-setwd("~/postdoc/germination/code")
-
 library(tidyverse)
 theme_set(theme_bw())
 library(readxl)
@@ -14,8 +12,12 @@ library(ggpubr)
 library(AICcmodavg)
 library(ggeffects)
 
+site <- data.frame(site=c("MUS", "HED", "MON", "KEK", "KIP"), 
+                   latitude=c(49.932, 49.243, 48.460, 48.191, 46.740),
+                   longitude=c(-78.698, -78.311, -79.418, -79.112, -78.905))
+
 #Growth data
-height <- read_excel("~/postdoc/germination/github/data/height.xlsx")
+height <- read_excel("data/height.xlsx")
 
 head(height)
 
@@ -58,16 +60,19 @@ height_mort_cold <- height %>%
 
 growth <- height_mort_cold %>% 
   group_by(site, seedling_ID, block, light) %>% 
+  mutate(RGR=log(as.numeric(height))-log(lag(as.numeric(height))),
+         RGR=case_when(year=="2006"~RGR/2,
+                          year=="2007"~RGR)) %>% 
   mutate(growth=as.numeric(height)-lag(as.numeric(height)),
          growth=case_when(year=="2006"~growth/2,
-                          year=="2007"~growth)) %>% 
+                       year=="2007"~growth)) %>% 
   na.omit()
 
 
 growth$site <- factor(growth$site, levels = c("KIP", "KEK", "MON", "HED", "MUS"))
 
 #Climate data
-clim <- readRDS("~/postdoc/germination/github/data/clim_growth.rds") %>% 
+clim <- readRDS("data/clim_growth.rds") %>% 
   mutate(year=as.character(year)) %>% 
   rename(nb_late_frost_event=n_frost)
 
@@ -77,7 +82,8 @@ growth <- growth %>%
   na.omit() %>% 
   mutate(seedling_ID=paste(site, seedling_ID, light, block, sep="_")) %>% 
   mutate(site_block=paste0(site, "_", block)) %>% 
-  mutate(height=as.numeric(height))
+  mutate(height=as.numeric(height)) %>% 
+  na.omit()
 
 growth$light  <- case_when(
   growth$light  == "SH-1" ~ "Open-canopy",
@@ -85,68 +91,81 @@ growth$light  <- case_when(
   growth$light == "SH-3" ~ "Dense-canopy")
 growth$light  <- factor(growth$light, levels = c("Dense-canopy", "Intermediate", "Open-canopy"))
 
+growth <- growth %>% left_join(site)
+
 #Random effect model selection
-mod_re1 <- lmer(log(growth+1)~ scale(height) + light + 
+mod_re1 <- lmer(log(growth+1)~ latitude + scale(height) + light + 
                   scale(temperature) + scale(nb_late_frost_event) + scale(precipitation) +
-                (1 | site/block) + (1 | seedling_ID) + (1 | year), data=growth)
+                (1 | site_block) + (1 | seedling_ID) + (1 | year), data=growth)
 
-mod_re2 <- lmer(log(growth+1)~ scale(height) + light + 
+mod_re2 <- lmer(log(growth+1)~ latitude + scale(height) + light + 
                   scale(temperature) + scale(nb_late_frost_event) + scale(precipitation) + 
-                  (1 | site/block) + (1 | seedling_ID), data=growth)
+                  (1 | site_block) + (1 | seedling_ID), data=growth)
 
-mod_re3 <- lmer(log(growth+1)~ scale(height) + light + 
+mod_re3 <- lmer(log(growth+1)~ latitude + scale(height) + light + 
                   scale(temperature) + scale(nb_late_frost_event) + scale(precipitation) + 
-                  (1 | site/block) , data=growth)
+                  (1 | site_block) , data=growth)
 
-mod_re4 <- lm(log(growth+1)~ scale(height) + light + 
+mod_re4 <- lm(log(growth+1)~ latitude + scale(height) + light + 
                 scale(temperature) + scale(nb_late_frost_event) + scale(precipitation) , data=growth)
 
 AIC_re <- data.frame(mod=1:4, AIC=c(AIC(mod_re1), AIC(mod_re2), AIC(mod_re3), AIC(mod_re4)))
 AIC_re
 
 #Fixed effect model selection
-mod_me1 <- lmer(log(growth+1)~ scale(height) + light + 
+mod_me1 <- lmer(log(growth+1)~ latitude + scale(height) + light + 
                   scale(temperature) + scale(nb_late_frost_event) + scale(precipitation) +
-                light:scale(height) + light:scale(temperature) + 
-                  light:scale(precipitation) + light:scale(nb_late_frost_event) +
-                  (1 | site/block) + (1 | seedling_ID) , data=growth)
-
-mod_me2 <- lmer(log(growth+1)~ scale(height) + light + 
-                  scale(temperature) + scale(nb_late_frost_event) + scale(precipitation) +
+                  
+                  scale(temperature):scale(precipitation) +
                   light:scale(height) + light:scale(temperature) + 
+                  light:scale(precipitation) + light:scale(nb_late_frost_event)+
+                  (1 | site_block) + (1 | seedling_ID) , data=growth)
+
+mod_me2 <- lmer(log(growth+1)~ latitude + light + 
+                  scale(temperature) + scale(nb_late_frost_event) + scale(precipitation) +
+                  
+                  scale(temperature):scale(precipitation) +
+                  light:scale(height) + light:scale(temperature)+
                   light:scale(precipitation) +
-                  (1 | site/block) + (1 | seedling_ID), data=growth)
+                  (1 | site_block) + (1 | seedling_ID), data=growth)
 
-mod_me3 <- lmer(log(growth+1)~ scale(height) + light + 
+mod_me3 <- lmer(log(growth+1)~ latitude + light + 
                   scale(temperature) + scale(nb_late_frost_event) + scale(precipitation) +
-                light:scale(height) + light:scale(temperature) + 
-                  (1 | site/block) + (1 | seedling_ID), data=growth)
+                  scale(temperature):scale(precipitation) +
+                light:scale(height) + light:scale(temperature)+
+                  (1 | site_block) + (1 | seedling_ID), data=growth)
 
-mod_me4 <- lmer(log(growth+1)~ scale(height) + light + 
+mod_me4 <- lmer(log(growth+1)~ latitude + light + 
                   scale(temperature) + scale(nb_late_frost_event) + scale(precipitation) +
-                  light:scale(height) +
-                  (1 | site/block) + (1 | seedling_ID), data=growth)
+                  scale(temperature):scale(precipitation) +
+                  light:scale(height)+
+                  (1 | site_block) + (1 | seedling_ID), data=growth)
 
-mod_me5 <- lmer(log(growth+1)~ scale(height) + light + 
-                  scale(temperature) + scale(precipitation) + scale(nb_late_frost_event) + 
-                  (1 | site/block) + (1 | seedling_ID), data=growth)
+mod_me5 <- lmer(log(growth+1)~ latitude + light + 
+                  scale(temperature) + scale(precipitation) + scale(nb_late_frost_event)+
+                  scale(temperature):scale(precipitation) +
+                  (1 | site_block) + (1 | seedling_ID), data=growth)
 
-mod_me6 <- lmer(log(growth+1)~ scale(height) + light + 
-                  scale(temperature) + scale(precipitation) + 
-                  (1 | site/block) + (1 | seedling_ID), data=growth)
+mod_me6 <- lmer(log(growth+1)~ latitude + light + 
+                  scale(temperature) + scale(precipitation) + scale(nb_late_frost_event)+
+                  (1 | site_block) + (1 | seedling_ID), data=growth)
 
-mod_me7 <- lmer(log(growth+1)~ scale(height) + light + 
-                  scale(temperature) +
-                  (1 | site/block) + (1 | seedling_ID), data=growth)
+mod_me7 <- lmer(log(growth+1)~ latitude + light + 
+                  scale(temperature) + scale(precipitation)+
+                  (1 | site_block) + (1 | seedling_ID), data=growth)
 
-mod_me8 <- lmer(log(growth+1)~ scale(height) + light +
-                  (1 | site/block) + (1 | seedling_ID), data=growth)
+mod_me8 <- lmer(log(growth+1)~ latitude + light + 
+                  scale(temperature)+
+                  (1 | site_block) + (1 | seedling_ID), data=growth)
 
-mod_me9 <- lmer(log(growth+1)~ scale(height) +
-                  (1 | site/block) + (1 | seedling_ID), data=growth)
+mod_me9 <- lmer(log(growth+1)~ latitude + light+
+                  (1 | site_block) + (1 | seedling_ID), data=growth)
 
-mod_me10 <- lmer(log(growth+1)~ 1 +
-                   (1 | site/block) + (1 | seedling_ID), data=growth)
+mod_me10 <- lmer(log(growth+1)~ latitude +
+                  (1 | site_block) + (1 | seedling_ID), data=growth)
+
+mod_me11 <- lmer(log(growth+1)~1+
+                   (1 | site_block) + (1 | seedling_ID), data=growth)
 
 liste_mod <- list(
   mod_me1 = mod_me1,
@@ -158,13 +177,21 @@ liste_mod <- list(
   mod_me7 = mod_me7,
   mod_me8 = mod_me8,
   mod_me9 = mod_me9,
-  mod_me10 = mod_me10)
+  mod_me10 = mod_me10,
+  mod_me11 = mod_me11)
 
 aictab(liste_mod)
 
 sel_mod <- mod_me1
 
 summary(sel_mod)
+
+
+source("diagonistic_plot_function.R")
+
+#plot diagnostics
+ggsave(plot=diagnostic_plots(sel_mod, growth), filename="figures/SI_diag_plot_growth.png", 
+       width=8, height=10)
 
 
 #anova on the model with most effect
@@ -177,10 +204,10 @@ r2
 #Figures 6
 #Figures 6.b precipitation × light
 
-gge_precip <- ggpredict(sel_mod, terms = c("precipitation [all]", "light"))
+gge_precip <- ggpredict(sel_mod, terms = c("precipitation [all]"))
 
-p_precip <- ggplot(gge_precip, aes(x = x, y = predicted, color = group, fill = group)) +
-  geom_line(size = 1) +
+p_precip <- ggplot(gge_precip, aes(x = x, y = predicted)) +
+  geom_line(linewidth = 1) +
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, color = NA) +
   labs(
     x = "Precipitation (in mm)",
@@ -189,6 +216,7 @@ p_precip <- ggplot(gge_precip, aes(x = x, y = predicted, color = group, fill = g
     fill = "Light treatment"
   ) +
   theme_minimal()+ 
+  coord_cartesian(ylim = c(0, 80)) +
   theme(strip.text.x = element_text(size = 12),
         axis.text=element_text(size=12),
         axis.title=element_text(size=14),
@@ -196,10 +224,24 @@ p_precip <- ggplot(gge_precip, aes(x = x, y = predicted, color = group, fill = g
         legend.text = element_text(size=12),
         legend.position = "bottom",
         panel.background = element_rect(fill = "white", color = NA),
-        plot.background  = element_rect(fill = "white", color = NA))
+        plot.background  = element_rect(fill = "white", color = NA))+
+  guides(
+    color = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1,
+      byrow = TRUE
+    ),
+    fill = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1,
+      byrow = TRUE
+    )
+  )
 
 #Figures 6.a temperature × light
-gge_temp <- ggpredict(sel_mod, terms = c("temperature [all]", "light"))
+gge_temp <- ggpredict(sel_mod, terms = c("temperature [17.7:21.1 by=0.1]", "light"))
 
 p_temp <- ggplot(gge_temp, aes(x = x, y = predicted, color = group, fill = group)) +
   geom_line(linewidth = 1) +
@@ -211,14 +253,29 @@ p_temp <- ggplot(gge_temp, aes(x = x, y = predicted, color = group, fill = group
     fill = "Light treatment"
   ) +
   theme_minimal()+ 
+  coord_cartesian(ylim = c(0, 80)) +
   theme(strip.text.x = element_text(size = 12),
         axis.text=element_text(size=12),
-        axis.title=element_text(size=14),
+        axis.title=element_text(size=13),
         legend.title = element_text(size = 14),
         legend.text = element_text(size=12),
         legend.position = "bottom",
         panel.background = element_rect(fill = "white", color = NA),
-        plot.background  = element_rect(fill = "white", color = NA))
+        plot.background  = element_rect(fill = "white", color = NA))+
+  guides(
+    color = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1,
+      byrow = TRUE
+    ),
+    fill = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1,
+      byrow = TRUE
+    )
+  )
 
 #Figures 6.c late frost events × light
 gge_frost <- ggpredict(sel_mod, terms = c("nb_late_frost_event [all]", "light"))
@@ -232,6 +289,7 @@ p_frost <- ggplot(gge_frost, aes(x = x, y = predicted, color = group, fill = gro
     color = "Light treatment",
     fill = "Light treatment"
   ) +
+  coord_cartesian(ylim = c(0, 80)) +
   theme_minimal()+ 
   theme(strip.text.x = element_text(size = 12),
         axis.text=element_text(size=12),
@@ -240,21 +298,84 @@ p_frost <- ggplot(gge_frost, aes(x = x, y = predicted, color = group, fill = gro
         legend.text = element_text(size=12),
         legend.position = "bottom",
         panel.background = element_rect(fill = "white", color = NA),
-        plot.background  = element_rect(fill = "white", color = NA))
+        plot.background  = element_rect(fill = "white", color = NA))+
+  guides(
+    color = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1,
+      byrow = TRUE
+    ),
+    fill = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1,
+      byrow = TRUE
+    )
+  )
+
+quantile(growth$precipitation, prob=c(0, 0.1, 0.5, 0.9, 1))
+
+min(growth$temperature)
+max(growth$temperature)
+gge_prec_temp <- ggpredict(
+  sel_mod,
+  terms = c(
+    "temperature [17.7:21.1 by=0.1]",
+    "precipitation [316, 330, 383]"
+  )
+)
+
+p_temp_prec <- ggplot(gge_prec_temp, aes(x = x, y = predicted, color = group, fill = group)) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, color = NA) +
+  labs(
+    x = "Temperature",
+    y = NULL) +
+  coord_cartesian(ylim = c(0, 80)) +
+  scale_color_viridis_d(name = "Precipitation (in mm)") +
+  scale_fill_viridis_d(name = "Precipitation (in mm)") +
+  theme_minimal()+ 
+  theme(strip.text.x = element_text(size = 12),
+        axis.text=element_text(size=12),
+        axis.title=element_text(size=14),
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size=12),
+        legend.position = "bottom",
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background  = element_rect(fill = "white", color = NA))+
+  guides(
+    color = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1,
+      byrow = TRUE
+    ),
+    fill = guide_legend(
+      title.position = "top",
+      title.hjust = 0.5,
+      nrow = 1,
+      byrow = TRUE
+    )
+  )
 
 clim_height <- ggarrange(
   p_temp, p_precip, p_frost,
   ncol = 3, nrow = 1,
   common.legend = TRUE, legend = "bottom",
   labels = c("a","b","c"),
-  label.x = c(-0.02, -0.02, -0.04),  
+  label.x = c(0, -0.04, -0.04),  
   label.y = c(1, 1, 1)
 ) +
   bgcolor("white") +
   border("white")
 
-ggsave(plot=clim_height, filename="~/postdoc/germination/github/figures/growth_clim_effect.png", 
-       width=8, height=3.5)
+clim_height2 <- ggarrange(clim_height, ggarrange(p_temp_prec, labels=c("d"),
+                                                 label.x = -0.04,  
+                                                 label.y =  1), ncol=2, nrow=1, widths=c(0.75,0.25))
+
+ggsave(plot=clim_height2, filename="figures/growth_clim_effect.png", 
+       width=11, height=4)
 
 
 #Figure 7 Height growth differrences between sites
@@ -304,6 +425,6 @@ site_plot <- ggplot()+
 
 site_plot
 
-ggsave(plot=site_plot, filename="~/postdoc/germination/github/figures/growth_site_effect.png", 
+ggsave(plot=site_plot, filename="figures/growth_site_effect.png", 
        width=8, height=4)
 
