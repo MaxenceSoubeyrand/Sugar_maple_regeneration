@@ -157,7 +157,8 @@ car::Anova(sel_mod, type=2)
 anova(sel_mod)
 
 #Marginal and conditional R²
-1 - (as.numeric(logLik(sel_mod)) / as.numeric(logLik(update(sel_mod, . ~ 1))))
+library(MuMIn)
+r.squaredGLMM(sel_mod)
 
 
 #Prédiction for each climate effect with interaction (Figure 3)
